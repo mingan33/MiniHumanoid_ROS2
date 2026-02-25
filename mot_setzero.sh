@@ -1,0 +1,5 @@
+cansend can0 001#FFFFFFFFFFFFFFFE
+cansend can0 002#FFFFFFFFFFFFFFFE
+cansend can0 003#FFFFFFFFFFFFFFFE 
+cansend can0 7FF#00040003
+cansend can0 7FF#00050003
