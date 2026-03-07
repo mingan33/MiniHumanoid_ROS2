@@ -21,6 +21,20 @@ class MotorsNode : public rclcpp::Node {
         Kp_MIT = 0.0;
         Kd_MIT = 0.0;
 
+        //各关节模型方向和电机电机方向转换参数
+        left_leg_joint1_dir = 1;
+        left_leg_joint2_dir = -1;
+        left_leg_joint3_dir = 1;
+        right_leg_joint1_dir = 1;
+        right_leg_joint2_dir = -1;
+        right_leg_joint3_dir = 1;
+        left_arm_joint1_dir = 1;
+        left_arm_joint2_dir = -1;
+        left_arm_joint3_dir = 1;
+        right_arm_joint1_dir = 1;
+        right_arm_joint2_dir = -1;
+        right_arm_joint3_dir = 1;
+
         //打印参数
         RCLCPP_INFO(this->get_logger(), "can0_startID: %d", can0_startID_);
         RCLCPP_INFO(this->get_logger(), "can0_endID: %d", can0_endID_);
