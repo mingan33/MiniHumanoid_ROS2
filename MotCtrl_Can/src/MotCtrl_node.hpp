@@ -131,10 +131,14 @@ class MotorsNode : public rclcpp::Node {
     float Kp_MIT,Kd_MIT;
 
     std::vector<std::shared_ptr<DmMotorDriver>> left_leg_motors_DM, right_leg_motors_DM, left_arm_motors_DM, right_arm_motors_DM;
-
+    
     //std::vector<std::shared_ptr<EncosMotorDriver>> left_leg_motors_ENC;
-
     int can0_startID_, can0_endID_, can1_startID_, can1_endID_, can2_startID_, can2_endID_, can3_startID_, can3_endID_;
+    
+    int left_leg_joint1_dir, left_leg_joint2_dir, left_leg_joint3_dir;
+    int right_leg_joint1_dir, right_leg_joint2_dir, right_leg_joint3_dir;
+    int left_arm_joint1_dir, left_arm_joint2_dir, left_arm_joint3_dir;
+    int right_arm_joint1_dir, right_arm_joint2_dir, right_arm_joint3_dir;
 
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr left_leg_publisher_, right_leg_publisher_, left_arm_publisher_, right_arm_publisher_;
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr left_leg_subscription_, right_leg_subscription_, left_arm_subscription_, right_arm_subscription_;
