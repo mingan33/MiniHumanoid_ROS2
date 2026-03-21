@@ -17,7 +17,6 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
-find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
@@ -30,6 +29,11 @@ ament_target_dependencies(robot_control rclcpp std_msgs sensor_msgs geometry_msg
 install(TARGETS
   robot_control
   DESTINATION lib/${PROJECT_NAME}
+)
+
+install(DIRECTORY
+  launch
+  DESTINATION share/${PROJECT_NAME}
 )
 
 

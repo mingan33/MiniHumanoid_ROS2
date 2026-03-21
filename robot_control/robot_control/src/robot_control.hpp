@@ -1,59 +1,34 @@
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/imu.hpp"
 #include <sensor_msgs/msg/joint_state.hpp>
-#include "std_msgs/msg/float32.hpp"
 #include <geometry_msgs/msg/twist.hpp>
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <mutex>
+#include <string>
+#include <vector>
 
 
 class Robot_Control: public rclcpp::Node 
 {
     public:
-        Robot_Control() : Node("Robot_Control"){
-
-            auto sensor_data_qos = rclcpp::QoS(rclcpp::KeepLast(1)).best_effort().durability_volatile();
-            auto control_command_qos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().durability_volatile();
-
-            // 模型调用定时器
-            Model_timer = this->create_wall_timer(std::chrono::milliseconds(250),std::bind(&Robot_Control::model_timer_callback,this));
-
-            // 订阅控制指令
-            cmd_subscription_ = this->create_subscription<geometry_msgs::msg::Twist>(
-                "/cmd_vel", sensor_data_qos, std::bind(&Robot_Control::subs_cmd_callback,this, std::placeholders::_1
-            ));
-
-            // 订阅IMU
-            imu_subscription_ = this->create_subscription<sensor_msgs::msg::Imu>(
-                "/Imu", sensor_data_qos, std::bind(&Robot_Control::subs_imu_callback, this, std::placeholders::_1
-            ));
-
-            // 订阅四肢关节信息
-            left_leg_subscription_ = this->create_subscription<sensor_msgs::msg::JointState>(
-                "/joint_states_left_leg", sensor_data_qos,
-                std::bind(&Robot_Control::subs_left_leg_callback, this, std::placeholders::_1));
-            right_leg_subscription_ = this->create_subscription<sensor_msgs::msg::JointState>(
-                "/joint_states_right_leg", sensor_data_qos,
-                std::bind(&Robot_Control::subs_right_leg_callback, this, std::placeholders::_1));
-            left_arm_subscription_ = this->create_subscription<sensor_msgs::msg::JointState>(
-                "/joint_states_left_arm", sensor_data_qos,
-                std::bind(&Robot_Control::subs_left_arm_callback, this, std::placeholders::_1));
-            right_arm_subscription_ = this->create_subscription<sensor_msgs::msg::JointState>(
-                "/joint_states_right_arm", sensor_data_qos,
-                std::bind(&Robot_Control::subs_right_arm_callback, this, std::placeholders::_1));
-
-            // 发布四肢关节指令
-            left_leg_publisher_ =
-                this->create_publisher<sensor_msgs::msg::JointState>("/joint_command_left_leg", control_command_qos);
-            right_leg_publisher_ =
-                this->create_publisher<sensor_msgs::msg::JointState>("/joint_command_right_leg", control_command_qos);
-            left_arm_publisher_ =
-                this->create_publisher<sensor_msgs::msg::JointState>("/joint_command_left_arm", control_command_qos);
-            right_arm_publisher_ =
-                this->create_publisher<sensor_msgs::msg::JointState>("/joint_command_right_arm", control_command_qos);
-        }
+        Robot_Control();
 
         void model_timer_callback();
+        void watchdog_timer_callback();
 
         void joint_cmd_publish();
+        void publish_group_command(
+            const rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr& publisher,
+            int dof,
+            float pos,
+            float vel,
+            float effort);
+        bool validate_joint_state(
+            const std::shared_ptr<sensor_msgs::msg::JointState>& msg,
+            const char* group_name,
+            size_t expected_dof);
 
         //发布订阅函数
         void subs_left_leg_callback(const std::shared_ptr<sensor_msgs::msg::JointState> msg);
@@ -65,6 +40,20 @@ class Robot_Control: public rclcpp::Node
 
 
     private:   
+        // 参数化控制配置
+        int control_period_ms_{20};
+        int watchdog_period_ms_{20};
+        int cmd_timeout_ms_{300};
+        int feedback_log_period_ms_{1000};
+        bool verbose_log_{false};
+        int left_leg_dof_{3};
+        int right_leg_dof_{3};
+        int left_arm_dof_{3};
+        int right_arm_dof_{3};
+        float nominal_joint_pos_{0.0f};
+        float cmd_vel_to_joint_vel_gain_{1.0f};
+        float yaw_to_joint_vel_gain_{0.5f};
+
         // 订阅控制指令
         rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_subscription_;
 
@@ -77,9 +66,13 @@ class Robot_Control: public rclcpp::Node
         // 发布四肢关节指令
         rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr left_leg_publisher_, right_leg_publisher_, left_arm_publisher_, right_arm_publisher_;
 
-        // 模型调用定时器
+        // 控制定时器与命令超时看门狗
         rclcpp::TimerBase::SharedPtr Model_timer;
+        rclcpp::TimerBase::SharedPtr watchdog_timer_;
 
-        float Pos_des,Vel_des,Tor_des;
-
+        std::mutex cmd_mutex_;
+        float cmd_linear_x_{0.0f};
+        float cmd_angular_z_{0.0f};
+        std::atomic<int64_t> last_cmd_ns_{0};
+        std::atomic<bool> cmd_timed_out_{true};
 };

@@ -2,7 +2,7 @@
 
 MiniHumanoid 的 ROS2 控制工程，包含：
 
-- `MotCtrl_Can`：底层 CAN 电机控制节点（DM 电机）
+- `MotCtrl_Can`：底层 CAN 电机控制节点（DM 和 ENCOS电机）
 - `robot_control`：上层机器人控制节点（订阅传感器与关节反馈，发布关节命令）
 
 ---
@@ -41,10 +41,6 @@ MiniHumanoid_ROS2/
 colcon build --symlink-install
 source install/setup.bash
 ```
-
-如果你是新终端，运行节点前都需要重新 `source install/setup.bash`。
-
----
 
 ## 4. 运行步骤
 
@@ -98,6 +94,8 @@ ros2 launch MotCtrl_Can MotCtrl.launch.py \
 ### 步骤 3：启动机器人控制节点
 
 ```bash
+ros2 launch robot_control robot_control.launch.py
+# 或者（不经 launch，直接运行可执行）
 ros2 run robot_control robot_control
 ```
 
@@ -127,6 +125,15 @@ ros2 run robot_control robot_control
   - 四肢 `/joint_states_*`
 - 发布：
   - 四肢 `/joint_command_*`（`sensor_msgs/msg/JointState`）
+- 关键参数（可通过 `ros2 run ... --ros-args -p name:=value` 配置）：
+  - `control_period_ms`：控制发布周期，默认 `20`
+  - `watchdog_period_ms`：`cmd_vel` 超时检测周期，默认 `20`
+  - `cmd_timeout_ms`：`cmd_vel` 超时阈值，默认 `300`（超时后自动进入安全输出）
+  - `left_leg_dof/right_leg_dof/left_arm_dof/right_arm_dof`：四链路关节数量，默认 `3`
+  - `nominal_joint_pos`：安全输出时的目标位置，默认 `0.0`
+  - `cmd_vel_to_joint_vel_gain`：线速度到关节速度映射增益，默认 `1.0`
+  - `yaw_to_joint_vel_gain`：角速度到左右腿速度差映射增益，默认 `0.5`
+  - `verbose_log`：是否开启调试日志，默认 `false`
 
 ---
 
@@ -274,5 +281,5 @@ sudo ./can.sh
 ros2 launch MotCtrl_Can MotCtrl.launch.py
 # 新开一个终端后：
 source install/setup.bash
-ros2 run robot_control robot_control
+ros2 launch robot_control robot_control.launch.py
 ```

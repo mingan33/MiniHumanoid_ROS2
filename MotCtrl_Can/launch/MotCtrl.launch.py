@@ -74,9 +74,9 @@ def generate_launch_description():
         DeclareLaunchArgument("can1_joint_dirs", default_value="[1, -1, 1]"),
         DeclareLaunchArgument("can2_joint_dirs", default_value="[1, -1, 1]"),
         DeclareLaunchArgument("can3_joint_dirs", default_value="[1, -1, 1]"),
-        DeclareLaunchArgument("can0_motor_types", default_value=""),
-        DeclareLaunchArgument("can1_motor_types", default_value=""),
-        DeclareLaunchArgument("can2_motor_types", default_value=""),
-        DeclareLaunchArgument("can3_motor_types", default_value=""),
+        DeclareLaunchArgument("can0_motor_types", default_value="dm,encos,dm"),
+        DeclareLaunchArgument("can1_motor_types", default_value="dm,encos,dm"),
+        DeclareLaunchArgument("can2_motor_types", default_value="dm,encos,dm"),
+        DeclareLaunchArgument("can3_motor_types", default_value="dm,encos,dm"),
         node_MotCtrl,
     ])
