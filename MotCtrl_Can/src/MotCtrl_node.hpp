@@ -131,7 +131,7 @@ class MotorsNode : public rclcpp::Node {
     float Kp_MIT,Kd_MIT;
 
     std::vector<std::shared_ptr<DmMotorDriver>> left_leg_motors_DM, right_leg_motors_DM, left_arm_motors_DM, right_arm_motors_DM;
-    
+
     //std::vector<std::shared_ptr<EncosMotorDriver>> left_leg_motors_ENC;
     int can0_startID_, can0_endID_, can1_startID_, can1_endID_, can2_startID_, can2_endID_, can3_startID_, can3_endID_;
     
