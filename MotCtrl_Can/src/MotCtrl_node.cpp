@@ -1,25 +1,61 @@
 #include "MotCtrl_node.hpp"
+#include <algorithm>
 
 
 bool MotorsNode::validate_joint_command(
-    const std::shared_ptr<sensor_msgs::msg::JointState>& msg, const std::string& group_name) {
-    constexpr size_t kExpectedDof = 3;
-    if (msg->position.size() < kExpectedDof ||
-        msg->velocity.size() < kExpectedDof ||
-        msg->effort.size() < kExpectedDof) {
+    const std::shared_ptr<sensor_msgs::msg::JointState>& msg,
+    const std::string& group_name,
+    size_t expected_dof) {
+    if (msg->position.size() < expected_dof ||
+        msg->velocity.size() < expected_dof ||
+        msg->effort.size() < expected_dof) {
         RCLCPP_WARN_THROTTLE(
             this->get_logger(), *this->get_clock(), 2000,
-            "[%s] invalid JointState sizes, expected >=3 but got pos=%zu vel=%zu eff=%zu",
-            group_name.c_str(), msg->position.size(), msg->velocity.size(), msg->effort.size());
+            "[%s] invalid JointState sizes, expected >=%zu but got pos=%zu vel=%zu eff=%zu",
+            group_name.c_str(), expected_dof, msg->position.size(), msg->velocity.size(), msg->effort.size());
         return false;
     }
     return true;
 }
 
+std::vector<int> MotorsNode::to_int_dirs(const std::vector<int64_t>& dirs64) const {
+    std::vector<int> values;
+    values.reserve(dirs64.size());
+    for (const auto v : dirs64) {
+        if (v > 1 || v < -1) {
+            RCLCPP_WARN(
+                this->get_logger(),
+                "Direction value %lld is unusual, expected -1 or 1.",
+                static_cast<long long>(v));
+        }
+        values.push_back(static_cast<int>(v));
+    }
+    if (values.empty()) {
+        values.push_back(1);
+    }
+    return values;
+}
+
+void MotorsNode::normalize_dirs(std::vector<int>& dirs, size_t expected_dof, const std::string& group_name) {
+    if (dirs.size() < expected_dof) {
+        RCLCPP_WARN(
+            this->get_logger(),
+            "[%s] direction size (%zu) < dof (%zu), filling missing entries with +1.",
+            group_name.c_str(), dirs.size(), expected_dof);
+        dirs.resize(expected_dof, 1);
+    } else if (dirs.size() > expected_dof) {
+        RCLCPP_WARN(
+            this->get_logger(),
+            "[%s] direction size (%zu) > dof (%zu), truncating extras.",
+            group_name.c_str(), dirs.size(), expected_dof);
+        dirs.resize(expected_dof);
+    }
+}
+
 bool MotorsNode::cache_joint_command(
     const std::shared_ptr<sensor_msgs::msg::JointState>& msg,
     const std::string& group_name,
-    const std::array<int, 3>& dirs,
+    const std::vector<int>& dirs,
     JointCommand& cmd_cache,
     const char* recovered_log) {
     if (!is_init_.load()) {
@@ -28,20 +64,20 @@ bool MotorsNode::cache_joint_command(
             "Ignore %s command because motors are not initialized.", group_name.c_str());
         return false;
     }
-    if (!validate_joint_command(msg, group_name)) {
+    if (!validate_joint_command(msg, group_name, dirs.size())) {
         return false;
     }
 
+    // 订阅线程只负责缓存目标，真正下发由控制定时器完成
     JointCommand cmd;
-    cmd.pos = {static_cast<float>(msg->position[0] * dirs[0]),
-               static_cast<float>(msg->position[1] * dirs[1]),
-               static_cast<float>(msg->position[2] * dirs[2])};
-    cmd.vel = {static_cast<float>(msg->velocity[0] * dirs[0]),
-               static_cast<float>(msg->velocity[1] * dirs[1]),
-               static_cast<float>(msg->velocity[2] * dirs[2])};
-    cmd.effort = {static_cast<float>(msg->effort[0] * dirs[0]),
-                  static_cast<float>(msg->effort[1] * dirs[1]),
-                  static_cast<float>(msg->effort[2] * dirs[2])};
+    cmd.pos.resize(dirs.size());
+    cmd.vel.resize(dirs.size());
+    cmd.effort.resize(dirs.size());
+    for (size_t i = 0; i < dirs.size(); ++i) {
+        cmd.pos[i] = static_cast<float>(msg->position[i] * dirs[i]);
+        cmd.vel[i] = static_cast<float>(msg->velocity[i] * dirs[i]);
+        cmd.effort[i] = static_cast<float>(msg->effort[i] * dirs[i]);
+    }
     cmd.valid = true;
 
     {
@@ -56,19 +92,21 @@ bool MotorsNode::cache_joint_command(
 }
 
 void MotorsNode::publish_group(
-    const MotorGroup& motors, const std::array<int, 3>& dirs, const JointPublisher& publisher) {
+    const MotorGroup& motors, const std::vector<int>& dirs, const JointPublisher& publisher) {
     auto msg = sensor_msgs::msg::JointState();
     msg.header.stamp = this->now();
-    msg.name = {"joint1", "joint2", "joint3"};
-    msg.position = {motors[0]->get_motor_pos() * dirs[0],
-                    motors[1]->get_motor_pos() * dirs[1],
-                    motors[2]->get_motor_pos() * dirs[2]};
-    msg.velocity = {motors[0]->get_motor_spd() * dirs[0],
-                    motors[1]->get_motor_spd() * dirs[1],
-                    motors[2]->get_motor_spd() * dirs[2]};
-    msg.effort = {motors[0]->get_motor_current() * dirs[0],
-                  motors[1]->get_motor_current() * dirs[1],
-                  motors[2]->get_motor_current() * dirs[2]};
+    msg.name.reserve(motors.size());
+    msg.position.reserve(motors.size());
+    msg.velocity.reserve(motors.size());
+    msg.effort.reserve(motors.size());
+    // 发布维度以“电机数量与方向数量的较小值”为准，避免越界
+    const size_t dof = std::min(motors.size(), dirs.size());
+    for (size_t i = 0; i < dof; ++i) {
+        msg.name.push_back("joint" + std::to_string(i + 1));
+        msg.position.push_back(motors[i]->get_motor_pos() * dirs[i]);
+        msg.velocity.push_back(motors[i]->get_motor_spd() * dirs[i]);
+        msg.effort.push_back(motors[i]->get_motor_current() * dirs[i]);
+    }
     publisher->publish(msg);
 }
 
@@ -121,30 +159,20 @@ void MotorsNode::apply_joint_command() {
         right_arm_cmd = right_arm_cmd_;
     }
 
-    if (left_leg_cmd.valid) {
-        for (size_t i = 0; i < 3; ++i) {
-            left_leg_motors_DM[i]->MotorMitModeCmd(
-                left_leg_cmd.pos[i], left_leg_cmd.vel[i], Kp_MIT, Kd_MIT, left_leg_cmd.effort[i]);
+    // 控制回路统一从缓存读取，减少订阅回调抖动对时序的影响
+    auto apply_group = [this](const MotorGroup& motors, const JointCommand& cmd) {
+        if (!cmd.valid) {
+            return;
         }
-    }
-    if (right_leg_cmd.valid) {
-        for (size_t i = 0; i < 3; ++i) {
-            right_leg_motors_DM[i]->MotorMitModeCmd(
-                right_leg_cmd.pos[i], right_leg_cmd.vel[i], Kp_MIT, Kd_MIT, right_leg_cmd.effort[i]);
+        const size_t dof = std::min({motors.size(), cmd.pos.size(), cmd.vel.size(), cmd.effort.size()});
+        for (size_t i = 0; i < dof; ++i) {
+            motors[i]->MotorMitModeCmd(cmd.pos[i], cmd.vel[i], Kp_MIT, Kd_MIT, cmd.effort[i]);
         }
-    }
-    if (left_arm_cmd.valid) {
-        for (size_t i = 0; i < 3; ++i) {
-            left_arm_motors_DM[i]->MotorMitModeCmd(
-                left_arm_cmd.pos[i], left_arm_cmd.vel[i], Kp_MIT, Kd_MIT, left_arm_cmd.effort[i]);
-        }
-    }
-    if (right_arm_cmd.valid) {
-        for (size_t i = 0; i < 3; ++i) {
-            right_arm_motors_DM[i]->MotorMitModeCmd(
-                right_arm_cmd.pos[i], right_arm_cmd.vel[i], Kp_MIT, Kd_MIT, right_arm_cmd.effort[i]);
-        }
-    }
+    };
+    apply_group(left_leg_motors_DM, left_leg_cmd);
+    apply_group(right_leg_motors_DM, right_leg_cmd);
+    apply_group(left_arm_motors_DM, left_arm_cmd);
+    apply_group(right_arm_motors_DM, right_arm_cmd);
 }
 
 void MotorsNode::send_safe_command() {
@@ -163,6 +191,7 @@ void MotorsNode::control_timer_callback() {
     if (!is_init_.load()) {
         return;
     }
+    // 超时后由 watchdog 输出安全命令，控制回路暂停常规下发
     if (cmd_timed_out_.load()) {
         return;
     }
@@ -183,6 +212,7 @@ void MotorsNode::watchdog_timer_callback() {
     const int64_t last_ns = last_cmd_ns_.load();
     const int64_t elapsed_ms = (now_ns - last_ns) / 1000000;
 
+    // 长时间无新命令时进入安全模式（保持当前位置，速度/力矩清零）
     if (elapsed_ms > cmd_timeout_ms_) {
         if (!cmd_timed_out_.exchange(true)) {
             RCLCPP_WARN(
@@ -197,56 +227,56 @@ void MotorsNode::watchdog_timer_callback() {
 void MotorsNode::publish_left_leg() {
     publish_group(
         left_leg_motors_DM,
-        {left_leg_joint1_dir, left_leg_joint2_dir, left_leg_joint3_dir},
+        left_leg_joint_dirs_,
         left_leg_publisher_);
 }
 
 void MotorsNode::publish_right_leg() {
     publish_group(
         right_leg_motors_DM,
-        {right_leg_joint1_dir, right_leg_joint2_dir, right_leg_joint3_dir},
+        right_leg_joint_dirs_,
         right_leg_publisher_);
 }
 
 void MotorsNode::publish_left_arm() {    
     publish_group(
         left_arm_motors_DM,
-        {left_arm_joint1_dir, left_arm_joint2_dir, left_arm_joint3_dir},
+        left_arm_joint_dirs_,
         left_arm_publisher_);
 }
 
 void MotorsNode::publish_right_arm() {
     publish_group(
         right_arm_motors_DM,
-        {right_arm_joint1_dir, right_arm_joint2_dir, right_arm_joint3_dir},
+        right_arm_joint_dirs_,
         right_arm_publisher_);
 }
 
 void MotorsNode::subs_left_leg_callback(const std::shared_ptr<sensor_msgs::msg::JointState> msg) {
     cache_joint_command(
         msg, "left_leg",
-        {left_leg_joint1_dir, left_leg_joint2_dir, left_leg_joint3_dir},
+        left_leg_joint_dirs_,
         left_leg_cmd_, "Left leg command stream recovered.");
 }
 
 void MotorsNode::subs_right_leg_callback(const std::shared_ptr<sensor_msgs::msg::JointState> msg) {
     cache_joint_command(
         msg, "right_leg",
-        {right_leg_joint1_dir, right_leg_joint2_dir, right_leg_joint3_dir},
+        right_leg_joint_dirs_,
         right_leg_cmd_, "Right leg command stream recovered.");
 }
 
 void MotorsNode::subs_left_arm_callback(const std::shared_ptr<sensor_msgs::msg::JointState> msg) {
     cache_joint_command(
         msg, "left_arm",
-        {left_arm_joint1_dir, left_arm_joint2_dir, left_arm_joint3_dir},
+        left_arm_joint_dirs_,
         left_arm_cmd_, "Left arm command stream recovered.");
 }
 
 void MotorsNode::subs_right_arm_callback(const std::shared_ptr<sensor_msgs::msg::JointState> msg) {
     cache_joint_command(
         msg, "right_arm",
-        {right_arm_joint1_dir, right_arm_joint2_dir, right_arm_joint3_dir},
+        right_arm_joint_dirs_,
         right_arm_cmd_, "Right arm command stream recovered.");
 }
 

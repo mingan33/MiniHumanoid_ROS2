@@ -3,9 +3,9 @@
 #include "dm_motor_driver.hpp"
 #include "encos_motor_driver.hpp"
 #include <sensor_msgs/msg/joint_state.hpp>
-#include <array>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -17,43 +17,50 @@ class MotorsNode : public rclcpp::Node {
     using MotorGroup = std::vector<std::shared_ptr<DmMotorDriver>>;
     using JointPublisher = rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr;
     struct JointCommand {
-        std::array<float, 3> pos{0.0f, 0.0f, 0.0f};
-        std::array<float, 3> vel{0.0f, 0.0f, 0.0f};
-        std::array<float, 3> effort{0.0f, 0.0f, 0.0f};
+        std::vector<float> pos;
+        std::vector<float> vel;
+        std::vector<float> effort;
         bool valid{false};
     };
 
     MotorsNode() : Node("MotorCtrl_node") {
 
-        //设置参数值
-        can0_startID_ = 1;
-        can0_endID_ = 3;
-        can1_startID_ = 4;
-        can1_endID_ = 6;
-        can2_startID_ = 7;
-        can2_endID_ = 9;
-        can3_startID_ = 10;
-        can3_endID_ = 12;
+        // 每条 CAN 链路独立配置：起始 ID + 电机数量（默认从 0 开始）
+        can0_startID_ = this->declare_parameter<int>("can0_start_id", 0);
+        can1_startID_ = this->declare_parameter<int>("can1_start_id", 0);
+        can2_startID_ = this->declare_parameter<int>("can2_start_id", 0);
+        can3_startID_ = this->declare_parameter<int>("can3_start_id", 0);
+        int can0_motor_count = this->declare_parameter<int>("can0_motor_count", 3);
+        int can1_motor_count = this->declare_parameter<int>("can1_motor_count", 3);
+        int can2_motor_count = this->declare_parameter<int>("can2_motor_count", 3);
+        int can3_motor_count = this->declare_parameter<int>("can3_motor_count", 3);
+        if (can0_motor_count <= 0) {
+            RCLCPP_WARN(this->get_logger(), "can0_motor_count <= 0, fallback to 1");
+            can0_motor_count = 1;
+        }
+        if (can1_motor_count <= 0) {
+            RCLCPP_WARN(this->get_logger(), "can1_motor_count <= 0, fallback to 1");
+            can1_motor_count = 1;
+        }
+        if (can2_motor_count <= 0) {
+            RCLCPP_WARN(this->get_logger(), "can2_motor_count <= 0, fallback to 1");
+            can2_motor_count = 1;
+        }
+        if (can3_motor_count <= 0) {
+            RCLCPP_WARN(this->get_logger(), "can3_motor_count <= 0, fallback to 1");
+            can3_motor_count = 1;
+        }
+        can0_endID_ = can0_startID_ + can0_motor_count - 1;
+        can1_endID_ = can1_startID_ + can1_motor_count - 1;
+        can2_endID_ = can2_startID_ + can2_motor_count - 1;
+        can3_endID_ = can3_startID_ + can3_motor_count - 1;
 
+        // 控制环与超时保护参数
         Kp_MIT = static_cast<float>(this->declare_parameter<double>("kp_mit", 0.0));
         Kd_MIT = static_cast<float>(this->declare_parameter<double>("kd_mit", 0.0));
         cmd_timeout_ms_ = this->declare_parameter<int>("cmd_timeout_ms", 300);
         watchdog_period_ms_ = this->declare_parameter<int>("watchdog_period_ms", 20);
         control_period_ms_ = this->declare_parameter<int>("control_period_ms", 5);
-
-        //各关节模型方向和电机电机方向转换参数
-        left_leg_joint1_dir = 1;
-        left_leg_joint2_dir = -1;
-        left_leg_joint3_dir = 1;
-        right_leg_joint1_dir = 1;
-        right_leg_joint2_dir = -1;
-        right_leg_joint3_dir = 1;
-        left_arm_joint1_dir = 1;
-        left_arm_joint2_dir = -1;
-        left_arm_joint3_dir = 1;
-        right_arm_joint1_dir = 1;
-        right_arm_joint2_dir = -1;
-        right_arm_joint3_dir = 1;
 
         //打印参数
         RCLCPP_INFO(this->get_logger(), "can0_startID: %d", can0_startID_);
@@ -65,7 +72,7 @@ class MotorsNode : public rclcpp::Node {
         RCLCPP_INFO(this->get_logger(), "can3_startID: %d", can3_startID_);
         RCLCPP_INFO(this->get_logger(), "can3_endID: %d", can3_endID_);
 
-        //初始化电机类
+        // 按链路电机数量动态分配驱动对象
         left_leg_motors_DM.resize(can0_endID_ - can0_startID_ + 1);
         right_leg_motors_DM.resize(can1_endID_ - can1_startID_ + 1);
         left_arm_motors_DM.resize(can2_endID_ - can2_startID_ + 1);
@@ -88,11 +95,25 @@ class MotorsNode : public rclcpp::Node {
                 i, "can3", i+0x10, DM4310_24V);
         }
 
+        // 关节方向支持整型数组参数，长度会在 normalize_dirs 中自动对齐
+        left_leg_joint_dirs_ = to_int_dirs(
+            this->declare_parameter<std::vector<int64_t>>("can0_joint_dirs", std::vector<int64_t>{1, -1, 1}));
+        right_leg_joint_dirs_ = to_int_dirs(
+            this->declare_parameter<std::vector<int64_t>>("can1_joint_dirs", std::vector<int64_t>{1, -1, 1}));
+        left_arm_joint_dirs_ = to_int_dirs(
+            this->declare_parameter<std::vector<int64_t>>("can2_joint_dirs", std::vector<int64_t>{1, -1, 1}));
+        right_arm_joint_dirs_ = to_int_dirs(
+            this->declare_parameter<std::vector<int64_t>>("can3_joint_dirs", std::vector<int64_t>{1, -1, 1}));
+        normalize_dirs(left_leg_joint_dirs_, left_leg_motors_DM.size(), "left_leg");
+        normalize_dirs(right_leg_joint_dirs_, right_leg_motors_DM.size(), "right_leg");
+        normalize_dirs(left_arm_joint_dirs_, left_arm_motors_DM.size(), "left_arm");
+        normalize_dirs(right_arm_joint_dirs_, right_arm_motors_DM.size(), "right_arm");
+
         // left_leg_motors_ENC.resize(2);
         // left_leg_motors_ENC[0] = std::make_shared<EncosMotorDriver>(0x01, "can0", 0x11);
         // left_leg_motors_ENC[1] = std::make_shared<EncosMotorDriver>(0x02, "can0", 0x12);
 
-        //定义发布者和订阅者
+        // 命令订阅与状态发布
         auto sensor_data_qos = rclcpp::QoS(rclcpp::KeepLast(1)).best_effort().durability_volatile();
         auto control_command_qos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().durability_volatile();
 
@@ -118,6 +139,7 @@ class MotorsNode : public rclcpp::Node {
         right_arm_publisher_ =
             this->create_publisher<sensor_msgs::msg::JointState>("/joint_states_right_arm", sensor_data_qos);
 
+        // watchdog 负责命令超时保护，control loop 负责固定频率下发
         watchdog_timer_ = this->create_wall_timer(
             std::chrono::milliseconds(watchdog_period_ms_),
             std::bind(&MotorsNode::watchdog_timer_callback, this));
@@ -156,18 +178,22 @@ class MotorsNode : public rclcpp::Node {
     void publish_right_arm();
     void publish_group(
         const MotorGroup& motors,
-        const std::array<int, 3>& dirs,
+        const std::vector<int>& dirs,
         const JointPublisher& publisher);
 
     // Command processing
     bool validate_joint_command(
-        const std::shared_ptr<sensor_msgs::msg::JointState>& msg, const std::string& group_name);
+        const std::shared_ptr<sensor_msgs::msg::JointState>& msg,
+        const std::string& group_name,
+        size_t expected_dof);
     bool cache_joint_command(
         const std::shared_ptr<sensor_msgs::msg::JointState>& msg,
         const std::string& group_name,
-        const std::array<int, 3>& dirs,
+        const std::vector<int>& dirs,
         JointCommand& cmd_cache,
         const char* recovered_log);
+    std::vector<int> to_int_dirs(const std::vector<int64_t>& dirs64) const;
+    void normalize_dirs(std::vector<int>& dirs, size_t expected_dof, const std::string& group_name);
     void apply_joint_command();
     void send_safe_command();
 
@@ -201,10 +227,10 @@ class MotorsNode : public rclcpp::Node {
     //std::vector<std::shared_ptr<EncosMotorDriver>> left_leg_motors_ENC;
     int can0_startID_, can0_endID_, can1_startID_, can1_endID_, can2_startID_, can2_endID_, can3_startID_, can3_endID_;
     
-    int left_leg_joint1_dir, left_leg_joint2_dir, left_leg_joint3_dir;
-    int right_leg_joint1_dir, right_leg_joint2_dir, right_leg_joint3_dir;
-    int left_arm_joint1_dir, left_arm_joint2_dir, left_arm_joint3_dir;
-    int right_arm_joint1_dir, right_arm_joint2_dir, right_arm_joint3_dir;
+    std::vector<int> left_leg_joint_dirs_;
+    std::vector<int> right_leg_joint_dirs_;
+    std::vector<int> left_arm_joint_dirs_;
+    std::vector<int> right_arm_joint_dirs_;
 
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr left_leg_publisher_, right_leg_publisher_, left_arm_publisher_, right_arm_publisher_;
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr left_leg_subscription_, right_leg_subscription_, left_arm_subscription_, right_arm_subscription_;

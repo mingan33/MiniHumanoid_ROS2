@@ -77,7 +77,15 @@ ros2 launch MotCtrl_Can MotCtrl.launch.py \
   kd_mit:=0.1 \
   cmd_timeout_ms:=200 \
   watchdog_period_ms:=20 \
-  control_period_ms:=5
+  control_period_ms:=5 \
+  can0_start_id:=0 can0_motor_count:=3 \
+  can1_start_id:=0 can1_motor_count:=3 \
+  can2_start_id:=0 can2_motor_count:=3 \
+  can3_start_id:=0 can3_motor_count:=3 \
+  can0_joint_dirs:="[1,-1,1]" \
+  can1_joint_dirs:="[1,-1,1]" \
+  can2_joint_dirs:="[1,-1,1]" \
+  can3_joint_dirs:="[1,-1,1]"
 ```
 
 说明：`MotCtrl.launch.py` 已声明这些 launch 参数，既可按上面方式传入，也可不传使用默认值。
@@ -119,10 +127,10 @@ ros2 run robot_control robot_control
 
 ## 6. CAN 与电机分配
 
-- `can0`：左腿（ID 1~3）
-- `can1`：右腿（ID 4~6）
-- `can2`：左臂（ID 7~9）
-- `can3`：右臂（ID 10~12）
+- `can0`：左腿（默认 ID 0~2）
+- `can1`：右腿（默认 ID 0~2）
+- `can2`：左臂（默认 ID 0~2）
+- `can3`：右臂（默认 ID 0~2）
 
 默认波特率由 `can.sh` 配置为 `1000000`。
 
@@ -135,15 +143,36 @@ ros2 run robot_control robot_control
 - `cmd_timeout_ms`：命令超时阈值，超过后进入安全输出，默认 `300`
 - `watchdog_period_ms`：watchdog 检查周期，默认 `20`
 - `control_period_ms`：固定频率控制循环周期，默认 `5`（约 200Hz）
+- `can0_start_id/can1_start_id/can2_start_id/can3_start_id`：每条 CAN 链路的起始电机 ID，默认 `0`
+- `can0_motor_count/can1_motor_count/can2_motor_count/can3_motor_count`：每条 CAN 链路电机数量，默认 `3`
+- `can0_joint_dirs/can1_joint_dirs/can2_joint_dirs/can3_joint_dirs`：每条 CAN 链路的关节方向（整型数组），默认 `[1,-1,1]`
 
 说明：
 - 订阅回调只缓存目标，不直接下发电机命令。
 - 实际控制由 `control_period_ms` 定时循环执行。
 - 超时后 watchdog 下发安全命令（保持当前位置、速度 0、力矩 0）。
+- 每个 limb 的 `JointState` 维度按该 limb 实际电机数量动态处理（不再固定 3 关节）。
+- 命令消息要求至少包含该 limb 的关节数量，超过部分会被忽略。
+- 电机 ID 按每条 CAN 独立配置，不要求全局连续编号。
+- 方向参数长度若与电机数量不一致，节点会自动补齐或截断并打印告警。
 
 ---
 
-## 8. 常用调试命令
+## 8. 控制链路时序（文字版）
+
+1. 上层节点（如 `robot_control`）发布四肢命令到 `/joint_command_*`。
+2. `MotCtrl_node` 的订阅回调只做两件事：校验消息维度 + 缓存目标值。
+3. 固定周期 `control_timer_callback` 读取缓存目标，统一调用 `MotorMitModeCmd(...)` 下发。
+4. 同一个控制周期内发布 `/joint_states_*`，反馈当前电机状态。
+5. `watchdog_timer_callback` 持续检查“距上次命令的时间”。
+6. 若超时（`elapsed > cmd_timeout_ms`），切换到安全输出：保持当前位置、速度 0、力矩 0。
+7. 命令恢复后，退出超时状态，重新进入正常周期控制。
+
+这套结构的核心目的是把“消息接收”和“电机下发”解耦，减少回调抖动对控制时序的影响。
+
+---
+
+## 9. 常用调试命令
 
 查看当前 ROS2 话题：
 
@@ -171,7 +200,7 @@ candump can0
 
 ---
 
-## 9. 调参建议（起步值）
+## 10. 调参建议（起步值）
 
 > 以下仅作为联调起点，实际值请根据负载、减速比、机构刚度和控制目标逐步调整。
 
@@ -191,7 +220,7 @@ candump can0
 
 ---
 
-## 10. 电机零点脚本
+## 11. 电机零点脚本
 
 执行前请确认：
 
@@ -206,7 +235,7 @@ bash mot_setzero.sh
 
 ---
 
-## 11. 常见问题
+## 12. 常见问题
 
 ### 1) `can0: No such device`
 
@@ -225,7 +254,7 @@ bash mot_setzero.sh
 
 ---
 
-## 12. 快速开始（最短路径）
+## 13. 快速开始（最短路径）
 
 ```bash
 cd MiniHumanoid_ROS2

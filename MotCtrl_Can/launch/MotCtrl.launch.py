@@ -9,6 +9,18 @@ def generate_launch_description():
     cmd_timeout_ms = LaunchConfiguration("cmd_timeout_ms")
     watchdog_period_ms = LaunchConfiguration("watchdog_period_ms")
     control_period_ms = LaunchConfiguration("control_period_ms")
+    can0_start_id = LaunchConfiguration("can0_start_id")
+    can1_start_id = LaunchConfiguration("can1_start_id")
+    can2_start_id = LaunchConfiguration("can2_start_id")
+    can3_start_id = LaunchConfiguration("can3_start_id")
+    can0_motor_count = LaunchConfiguration("can0_motor_count")
+    can1_motor_count = LaunchConfiguration("can1_motor_count")
+    can2_motor_count = LaunchConfiguration("can2_motor_count")
+    can3_motor_count = LaunchConfiguration("can3_motor_count")
+    can0_joint_dirs = LaunchConfiguration("can0_joint_dirs")
+    can1_joint_dirs = LaunchConfiguration("can1_joint_dirs")
+    can2_joint_dirs = LaunchConfiguration("can2_joint_dirs")
+    can3_joint_dirs = LaunchConfiguration("can3_joint_dirs")
 
     node_MotCtrl = Node(
         package="MotCtrl_Can",
@@ -21,6 +33,18 @@ def generate_launch_description():
             "cmd_timeout_ms": cmd_timeout_ms,
             "watchdog_period_ms": watchdog_period_ms,
             "control_period_ms": control_period_ms,
+            "can0_start_id": can0_start_id,
+            "can1_start_id": can1_start_id,
+            "can2_start_id": can2_start_id,
+            "can3_start_id": can3_start_id,
+            "can0_motor_count": can0_motor_count,
+            "can1_motor_count": can1_motor_count,
+            "can2_motor_count": can2_motor_count,
+            "can3_motor_count": can3_motor_count,
+            "can0_joint_dirs": can0_joint_dirs,
+            "can1_joint_dirs": can1_joint_dirs,
+            "can2_joint_dirs": can2_joint_dirs,
+            "can3_joint_dirs": can3_joint_dirs,
         }],
     )
 
@@ -30,5 +54,17 @@ def generate_launch_description():
         DeclareLaunchArgument("cmd_timeout_ms", default_value="300"),
         DeclareLaunchArgument("watchdog_period_ms", default_value="20"),
         DeclareLaunchArgument("control_period_ms", default_value="5"),
+        DeclareLaunchArgument("can0_start_id", default_value="0"),
+        DeclareLaunchArgument("can1_start_id", default_value="0"),
+        DeclareLaunchArgument("can2_start_id", default_value="0"),
+        DeclareLaunchArgument("can3_start_id", default_value="0"),
+        DeclareLaunchArgument("can0_motor_count", default_value="3"),
+        DeclareLaunchArgument("can1_motor_count", default_value="3"),
+        DeclareLaunchArgument("can2_motor_count", default_value="3"),
+        DeclareLaunchArgument("can3_motor_count", default_value="3"),
+        DeclareLaunchArgument("can0_joint_dirs", default_value="[1, -1, 1]"),
+        DeclareLaunchArgument("can1_joint_dirs", default_value="[1, -1, 1]"),
+        DeclareLaunchArgument("can2_joint_dirs", default_value="[1, -1, 1]"),
+        DeclareLaunchArgument("can3_joint_dirs", default_value="[1, -1, 1]"),
         node_MotCtrl,
     ])
