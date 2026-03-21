@@ -69,6 +69,19 @@ ip -details link show can3
 ros2 launch MotCtrl_Can MotCtrl.launch.py
 ```
 
+可选：启动时覆盖 `MotCtrl_node` 关键参数（示例）
+
+```bash
+ros2 launch MotCtrl_Can MotCtrl.launch.py \
+  kp_mit:=1.0 \
+  kd_mit:=0.1 \
+  cmd_timeout_ms:=200 \
+  watchdog_period_ms:=20 \
+  control_period_ms:=5
+```
+
+说明：`MotCtrl.launch.py` 已声明这些 launch 参数，既可按上面方式传入，也可不传使用默认值。
+
 ### 步骤 3：启动机器人控制节点
 
 ```bash
@@ -115,7 +128,22 @@ ros2 run robot_control robot_control
 
 ---
 
-## 7. 常用调试命令
+## 7. `MotCtrl_node` 参数说明
+
+- `kp_mit`：MIT 控制中的 Kp，默认 `0.0`
+- `kd_mit`：MIT 控制中的 Kd，默认 `0.0`
+- `cmd_timeout_ms`：命令超时阈值，超过后进入安全输出，默认 `300`
+- `watchdog_period_ms`：watchdog 检查周期，默认 `20`
+- `control_period_ms`：固定频率控制循环周期，默认 `5`（约 200Hz）
+
+说明：
+- 订阅回调只缓存目标，不直接下发电机命令。
+- 实际控制由 `control_period_ms` 定时循环执行。
+- 超时后 watchdog 下发安全命令（保持当前位置、速度 0、力矩 0）。
+
+---
+
+## 8. 常用调试命令
 
 查看当前 ROS2 话题：
 
@@ -143,7 +171,27 @@ candump can0
 
 ---
 
-## 8. 电机零点脚本
+## 9. 调参建议（起步值）
+
+> 以下仅作为联调起点，实际值请根据负载、减速比、机构刚度和控制目标逐步调整。
+
+| 场景 | kp_mit | kd_mit | control_period_ms | cmd_timeout_ms | 建议 |
+|---|---:|---:|---:|---:|---|
+| 首次上电（空载） | 0.2 ~ 0.8 | 0.02 ~ 0.08 | 5 ~ 10 | 200 ~ 400 | 先确认方向和零位，动作幅度小 |
+| 单关节联调 | 0.8 ~ 2.0 | 0.05 ~ 0.2 | 5 | 200 | 先调到无明显振荡，再加大 kp |
+| 多关节低速联动 | 1.0 ~ 3.0 | 0.1 ~ 0.3 | 5 | 150 ~ 250 | 同步观察电流峰值与发热 |
+| 保守稳定优先 | 0.5 ~ 1.5 | 0.08 ~ 0.2 | 5 ~ 8 | 200 ~ 300 | 适合长时间连续测试 |
+
+调参顺序建议：
+
+1. 固定 `control_period_ms`（建议先用 `5`）。
+2. 从低 `kp_mit` 开始，逐步上调到“刚好跟随且不抖”。
+3. 用 `kd_mit` 抑制振荡，避免过大导致动作发硬。
+4. 适当收紧 `cmd_timeout_ms`，确保上位机中断时能快速进入安全模式。
+
+---
+
+## 10. 电机零点脚本
 
 执行前请确认：
 
@@ -158,7 +206,7 @@ bash mot_setzero.sh
 
 ---
 
-## 9. 常见问题
+## 11. 常见问题
 
 ### 1) `can0: No such device`
 
@@ -177,7 +225,7 @@ bash mot_setzero.sh
 
 ---
 
-## 10. 快速开始（最短路径）
+## 12. 快速开始（最短路径）
 
 ```bash
 cd MiniHumanoid_ROS2
