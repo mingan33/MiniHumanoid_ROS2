@@ -21,6 +21,10 @@ def generate_launch_description():
     can1_joint_dirs = LaunchConfiguration("can1_joint_dirs")
     can2_joint_dirs = LaunchConfiguration("can2_joint_dirs")
     can3_joint_dirs = LaunchConfiguration("can3_joint_dirs")
+    can0_motor_types = LaunchConfiguration("can0_motor_types")
+    can1_motor_types = LaunchConfiguration("can1_motor_types")
+    can2_motor_types = LaunchConfiguration("can2_motor_types")
+    can3_motor_types = LaunchConfiguration("can3_motor_types")
 
     node_MotCtrl = Node(
         package="MotCtrl_Can",
@@ -45,6 +49,10 @@ def generate_launch_description():
             "can1_joint_dirs": can1_joint_dirs,
             "can2_joint_dirs": can2_joint_dirs,
             "can3_joint_dirs": can3_joint_dirs,
+            "can0_motor_types": can0_motor_types,
+            "can1_motor_types": can1_motor_types,
+            "can2_motor_types": can2_motor_types,
+            "can3_motor_types": can3_motor_types,
         }],
     )
 
@@ -66,5 +74,9 @@ def generate_launch_description():
         DeclareLaunchArgument("can1_joint_dirs", default_value="[1, -1, 1]"),
         DeclareLaunchArgument("can2_joint_dirs", default_value="[1, -1, 1]"),
         DeclareLaunchArgument("can3_joint_dirs", default_value="[1, -1, 1]"),
+        DeclareLaunchArgument("can0_motor_types", default_value=""),
+        DeclareLaunchArgument("can1_motor_types", default_value=""),
+        DeclareLaunchArgument("can2_motor_types", default_value=""),
+        DeclareLaunchArgument("can3_motor_types", default_value=""),
         node_MotCtrl,
     ])

@@ -25,6 +25,7 @@ class EncosMotorDriver
     float get_motor_spd() { return motor_spd_; }
     float get_motor_current() { return motor_current_; }
     float get_motor_temperature() { return motor_temperature_; }
+    int get_rx_count() const { return rx_count_.load(); }
 
    private:
     void CanRxMsgCallback(const can_frame& rx_frame);  
@@ -47,6 +48,7 @@ class EncosMotorDriver
     std::shared_ptr<spdlog::logger> logger_;
     
     std::atomic<int> response_count_{0};
+    std::atomic<int> rx_count_{0};
     std::atomic<uint8_t> mos_temperature_{0};
     std::atomic<uint8_t> motor_temperature_{0};
     std::atomic<uint8_t> error_id_{0};

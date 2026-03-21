@@ -85,10 +85,15 @@ ros2 launch MotCtrl_Can MotCtrl.launch.py \
   can0_joint_dirs:="[1,-1,1]" \
   can1_joint_dirs:="[1,-1,1]" \
   can2_joint_dirs:="[1,-1,1]" \
-  can3_joint_dirs:="[1,-1,1]"
+  can3_joint_dirs:="[1,-1,1]" \
+  can0_motor_types:="dm,encos,dm" \
+  can1_motor_types:="dm,dm,dm" \
+  can2_motor_types:="encos,encos,dm" \
+  can3_motor_types:="dm,dm,dm"
 ```
 
 说明：`MotCtrl.launch.py` 已声明这些 launch 参数，既可按上面方式传入，也可不传使用默认值。
+启动后可在日志中查看 `DOF summary` 与 `Dir size summary`，确认每条 CAN 链路最终关节数量。
 
 ### 步骤 3：启动机器人控制节点
 
@@ -146,6 +151,10 @@ ros2 run robot_control robot_control
 - `can0_start_id/can1_start_id/can2_start_id/can3_start_id`：每条 CAN 链路的起始电机 ID，默认 `0`
 - `can0_motor_count/can1_motor_count/can2_motor_count/can3_motor_count`：每条 CAN 链路电机数量，默认 `3`
 - `can0_joint_dirs/can1_joint_dirs/can2_joint_dirs/can3_joint_dirs`：每条 CAN 链路的关节方向（整型数组），默认 `[1,-1,1]`
+- `can0_motor_types/can1_motor_types/can2_motor_types/can3_motor_types`：每条 CAN 链路电机类型配置（csv）
+  - 仅按电机索引配置（如 `dm,encos,dm`）
+  - 为空时按默认 `dm` 填充整条链路
+  - 非空时长度必须严格等于对应 `canX_motor_count`，否则节点拒绝启动
 
 说明：
 - 订阅回调只缓存目标，不直接下发电机命令。
@@ -155,6 +164,7 @@ ros2 run robot_control robot_control
 - 命令消息要求至少包含该 limb 的关节数量，超过部分会被忽略。
 - 电机 ID 按每条 CAN 独立配置，不要求全局连续编号。
 - 方向参数长度若与电机数量不一致，节点会自动补齐或截断并打印告警。
+- 每条链路只保留 `canX_motor_types` 一套配置，避免参数重复与双重语义。
 
 ---
 

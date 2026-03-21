@@ -187,6 +187,7 @@ void EncosMotorDriver::CanRxMsgCallback(const can_frame& rx_frame){
 
 			motor_temperature_ = (rx_frame.data[6]-50)/2;
 			mos_temperature_ = (rx_frame.data[7]-50)/2;
+            rx_count_++;
         }
 
 }

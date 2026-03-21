@@ -12,9 +12,84 @@
 #include <string>
 #include <vector>
 
+// 对 DM/ENCOS 电机做最小统一封装，避免主节点大量分支判断。
+class MotorWrapper {
+   public:
+    static std::shared_ptr<MotorWrapper> create_dm(
+        uint16_t motor_id, const std::string& can_interface, uint16_t master_id, DM_Motor_Model model) {
+        return std::shared_ptr<MotorWrapper>(
+            new MotorWrapper(std::make_shared<DmMotorDriver>(motor_id, can_interface, master_id, model)));
+    }
+
+    static std::shared_ptr<MotorWrapper> create_encos(
+        uint16_t motor_id, const std::string& can_interface, uint16_t master_id) {
+        return std::shared_ptr<MotorWrapper>(
+            new MotorWrapper(std::make_shared<EncosMotorDriver>(motor_id, can_interface, master_id)));
+    }
+
+    uint8_t MotorInit() {
+        if (dm_) {
+            return dm_->MotorInit();
+        }
+        // ENCOS：切到响应模式后，发送一帧安全 MIT 命令并等待回包确认链路可用。
+        const int rx_before = encos_->get_rx_count();
+        encos_->MotorSetting(0x02);
+        Timer::ThreadSleepForUs(2000);
+        encos_->MotorMitCtrlCmd(encos_->get_motor_pos(), 0.0f, 0.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 20; ++i) {
+            if (encos_->get_rx_count() > rx_before) {
+                return DMError::DM_UP;
+            }
+            Timer::ThreadSleepForUs(1000);
+        }
+        return DMError::DM_DOWN;
+    }
+
+    void MotorDeInit() {
+        if (dm_) {
+            dm_->MotorDeInit();
+        } else {
+            // ENCOS 无显式失能指令，退场时发送安全 MIT 命令。
+            encos_->MotorMitCtrlCmd(encos_->get_motor_pos(), 0.0f, 0.0f, 0.0f, 0.0f);
+        }
+    }
+
+    void MotorSetZero() {
+        if (dm_) {
+            dm_->MotorSetZero();
+        } else {
+            encos_->MotorSetting(0x03);
+        }
+    }
+
+    void MotorMitModeCmd(float pos, float vel, float kp, float kd, float tor) {
+        if (dm_) {
+            dm_->MotorMitModeCmd(pos, vel, kp, kd, tor);
+        } else {
+            encos_->MotorMitCtrlCmd(pos, vel, kp, kd, tor);
+        }
+    }
+
+    void refresh_motor_status() {
+        if (dm_) {
+            dm_->refresh_motor_status();
+        }
+    }
+
+    float get_motor_pos() const { return dm_ ? dm_->get_motor_pos() : encos_->get_motor_pos(); }
+    float get_motor_spd() const { return dm_ ? dm_->get_motor_spd() : encos_->get_motor_spd(); }
+    float get_motor_current() const { return dm_ ? dm_->get_motor_current() : encos_->get_motor_current(); }
+
+   private:
+    explicit MotorWrapper(std::shared_ptr<DmMotorDriver> dm) : dm_(std::move(dm)) {}
+    explicit MotorWrapper(std::shared_ptr<EncosMotorDriver> encos) : encos_(std::move(encos)) {}
+    std::shared_ptr<DmMotorDriver> dm_{nullptr};
+    std::shared_ptr<EncosMotorDriver> encos_{nullptr};
+};
+
 class MotorsNode : public rclcpp::Node {
    public:
-    using MotorGroup = std::vector<std::shared_ptr<DmMotorDriver>>;
+    using MotorGroup = std::vector<std::shared_ptr<MotorWrapper>>;
     using JointPublisher = rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr;
     struct JointCommand {
         std::vector<float> pos;
@@ -54,7 +129,6 @@ class MotorsNode : public rclcpp::Node {
         can1_endID_ = can1_startID_ + can1_motor_count - 1;
         can2_endID_ = can2_startID_ + can2_motor_count - 1;
         can3_endID_ = can3_startID_ + can3_motor_count - 1;
-
         // 控制环与超时保护参数
         Kp_MIT = static_cast<float>(this->declare_parameter<double>("kp_mit", 0.0));
         Kd_MIT = static_cast<float>(this->declare_parameter<double>("kd_mit", 0.0));
@@ -71,29 +145,47 @@ class MotorsNode : public rclcpp::Node {
         RCLCPP_INFO(this->get_logger(), "can2_endID: %d", can2_endID_);
         RCLCPP_INFO(this->get_logger(), "can3_startID: %d", can3_startID_);
         RCLCPP_INFO(this->get_logger(), "can3_endID: %d", can3_endID_);
-
         // 按链路电机数量动态分配驱动对象
         left_leg_motors_DM.resize(can0_endID_ - can0_startID_ + 1);
         right_leg_motors_DM.resize(can1_endID_ - can1_startID_ + 1);
         left_arm_motors_DM.resize(can2_endID_ - can2_startID_ + 1);
         right_arm_motors_DM.resize(can3_endID_ - can3_startID_ + 1);
 
-        for (int i = can0_startID_; i <= can0_endID_; i++) {
-            left_leg_motors_DM[i - can0_startID_] = std::make_shared<DmMotorDriver>(
-                i, "can0", i+0x10, DM4310_24V);
+        // canX_motor_types 仅按索引配置（示例："dm,encos,dm"）。
+        // 若为空字符串，则整条链路按默认 dm 填充。
+        // 若非空，则长度必须严格等于链路电机数；不匹配时拒绝启动。
+        auto can0_motor_types = parse_motor_types(
+            this->declare_parameter<std::string>("can0_motor_types", ""),
+            left_leg_motors_DM.size(),
+            "can0");
+        auto can1_motor_types = parse_motor_types(
+            this->declare_parameter<std::string>("can1_motor_types", ""),
+            right_leg_motors_DM.size(),
+            "can1");
+        auto can2_motor_types = parse_motor_types(
+            this->declare_parameter<std::string>("can2_motor_types", ""),
+            left_arm_motors_DM.size(),
+            "can2");
+        auto can3_motor_types = parse_motor_types(
+            this->declare_parameter<std::string>("can3_motor_types", ""),
+            right_arm_motors_DM.size(),
+            "can3");
+        if (can0_motor_types.empty() || can1_motor_types.empty() ||
+            can2_motor_types.empty() || can3_motor_types.empty()) {
+            RCLCPP_ERROR(
+                this->get_logger(),
+                "Invalid canX_motor_types config detected, refuse to start MotorCtrl_node.");
+            return;
         }
-        for (int i = can1_startID_; i <= can1_endID_; i++) {
-            right_leg_motors_DM[i - can1_startID_] = std::make_shared<DmMotorDriver>(
-                i, "can1", i+0x10, DM4310_24V);
-        }
-        for (int i = can2_startID_; i <= can2_endID_; i++) {
-            left_arm_motors_DM[i - can2_startID_] = std::make_shared<DmMotorDriver>(
-                i, "can2", i+0x10, DM4310_24V);
-        }
-        for (int i = can3_startID_; i <= can3_endID_; i++) {
-            right_arm_motors_DM[i - can3_startID_] = std::make_shared<DmMotorDriver>(
-                i, "can3", i+0x10, DM4310_24V);
-        }
+        RCLCPP_INFO(this->get_logger(), "can0 motor types: [%s]", join_motor_types(can0_motor_types).c_str());
+        RCLCPP_INFO(this->get_logger(), "can1 motor types: [%s]", join_motor_types(can1_motor_types).c_str());
+        RCLCPP_INFO(this->get_logger(), "can2 motor types: [%s]", join_motor_types(can2_motor_types).c_str());
+        RCLCPP_INFO(this->get_logger(), "can3 motor types: [%s]", join_motor_types(can3_motor_types).c_str());
+
+        init_motor_group(left_leg_motors_DM, can0_startID_, can0_endID_, "can0", can0_motor_types);
+        init_motor_group(right_leg_motors_DM, can1_startID_, can1_endID_, "can1", can1_motor_types);
+        init_motor_group(left_arm_motors_DM, can2_startID_, can2_endID_, "can2", can2_motor_types);
+        init_motor_group(right_arm_motors_DM, can3_startID_, can3_endID_, "can3", can3_motor_types);
 
         // 关节方向支持整型数组参数，长度会在 normalize_dirs 中自动对齐
         left_leg_joint_dirs_ = to_int_dirs(
@@ -109,9 +201,20 @@ class MotorsNode : public rclcpp::Node {
         normalize_dirs(left_arm_joint_dirs_, left_arm_motors_DM.size(), "left_arm");
         normalize_dirs(right_arm_joint_dirs_, right_arm_motors_DM.size(), "right_arm");
 
-        // left_leg_motors_ENC.resize(2);
-        // left_leg_motors_ENC[0] = std::make_shared<EncosMotorDriver>(0x01, "can0", 0x11);
-        // left_leg_motors_ENC[1] = std::make_shared<EncosMotorDriver>(0x02, "can0", 0x12);
+        RCLCPP_INFO(
+            this->get_logger(),
+            "DOF summary: can0=%zu can1=%zu can2=%zu can3=%zu",
+            left_leg_motors_DM.size(),
+            right_leg_motors_DM.size(),
+            left_arm_motors_DM.size(),
+            right_arm_motors_DM.size());
+        RCLCPP_INFO(
+            this->get_logger(),
+            "Dir size summary: can0=%zu can1=%zu can2=%zu can3=%zu",
+            left_leg_joint_dirs_.size(),
+            right_leg_joint_dirs_.size(),
+            left_arm_joint_dirs_.size(),
+            right_arm_joint_dirs_.size());
 
         // 命令订阅与状态发布
         auto sensor_data_qos = rclcpp::QoS(rclcpp::KeepLast(1)).best_effort().durability_volatile();
@@ -206,6 +309,16 @@ class MotorsNode : public rclcpp::Node {
     void deinit_group(const MotorGroup& motors);
     void set_zero_group(const MotorGroup& motors);
     void refresh_group(const MotorGroup& motors);
+    std::string normalize_motor_type(const std::string& type, const char* can_name) const;
+    std::vector<std::string> parse_motor_types(
+        const std::string& csv, size_t expected_count, const char* can_name) const;
+    std::string join_motor_types(const std::vector<std::string>& types) const;
+    void init_motor_group(
+        MotorGroup& group,
+        int start_id,
+        int end_id,
+        const std::string& can_interface,
+        const std::vector<std::string>& motor_types);
 
     std::atomic<bool> is_init_{false};
     std::atomic<bool> cmd_timed_out_{false};
@@ -226,7 +339,6 @@ class MotorsNode : public rclcpp::Node {
 
     //std::vector<std::shared_ptr<EncosMotorDriver>> left_leg_motors_ENC;
     int can0_startID_, can0_endID_, can1_startID_, can1_endID_, can2_startID_, can2_endID_, can3_startID_, can3_endID_;
-    
     std::vector<int> left_leg_joint_dirs_;
     std::vector<int> right_leg_joint_dirs_;
     std::vector<int> left_arm_joint_dirs_;
