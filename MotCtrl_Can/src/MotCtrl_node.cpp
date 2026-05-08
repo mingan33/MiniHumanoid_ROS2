@@ -107,7 +107,7 @@ void MotorsNode::init_motor_group(
     for (int id = start_id; id <= end_id; ++id) {
         const size_t idx = static_cast<size_t>(id - start_id);
         if (motor_types[idx] == "encos") {
-            group[idx] = MotorWrapper::create_encos(static_cast<uint16_t>(id), can_interface, static_cast<uint16_t>(id + 0x10));
+            group[idx] = MotorWrapper::create_encos(static_cast<uint16_t>(id), can_interface, static_cast<uint16_t>(id));
         } else {
             group[idx] = MotorWrapper::create_dm(static_cast<uint16_t>(id), can_interface, static_cast<uint16_t>(id + 0x10), DM4310_24V);
         }
@@ -382,9 +382,9 @@ void MotorsNode::subs_right_arm_callback(const std::shared_ptr<sensor_msgs::msg:
 void MotorsNode::init_motors() {
     bool all_init_ok = true;
     all_init_ok &= init_group(left_leg_motors_DM, can0_startID_, "can0");
-    all_init_ok &= init_group(right_leg_motors_DM, can1_startID_, "can1");
-    all_init_ok &= init_group(left_arm_motors_DM, can2_startID_, "can2");
-    all_init_ok &= init_group(right_arm_motors_DM, can3_startID_, "can3");
+    // all_init_ok &= init_group(right_leg_motors_DM, can1_startID_, "can1");
+    // all_init_ok &= init_group(left_arm_motors_DM, can2_startID_, "can2");
+    // all_init_ok &= init_group(right_arm_motors_DM, can3_startID_, "can3");
     if (!all_init_ok) {
         is_init_.store(false);
         RCLCPP_ERROR(
@@ -394,9 +394,9 @@ void MotorsNode::init_motors() {
     }
     Timer::ThreadSleepFor(1000);
     publish_left_leg();
-    publish_right_leg();
-    publish_left_arm();
-    publish_right_arm();
+    // publish_right_leg();
+    // publish_left_arm();
+    // publish_right_arm();
     last_cmd_ns_.store(this->now().nanoseconds());
     is_init_.store(true);
 }
@@ -428,17 +428,17 @@ void MotorsNode::read_motors(){
     Timer::ThreadSleepForUs(1000);
     publish_left_leg();
 
-    refresh_group(right_leg_motors_DM);
-    Timer::ThreadSleepForUs(1000);
-    publish_right_leg();
+    // refresh_group(right_leg_motors_DM);
+    // Timer::ThreadSleepForUs(1000);
+    // publish_right_leg();
 
-    refresh_group(left_arm_motors_DM);
-    Timer::ThreadSleepForUs(1000);
-    publish_left_arm();
+    // refresh_group(left_arm_motors_DM);
+    // Timer::ThreadSleepForUs(1000);
+    // publish_left_arm();
 
-    refresh_group(right_arm_motors_DM);
-    Timer::ThreadSleepForUs(1000);
-    publish_right_arm();
+    // refresh_group(right_arm_motors_DM);
+    // Timer::ThreadSleepForUs(1000);
+    // publish_right_arm();
 
 }
 

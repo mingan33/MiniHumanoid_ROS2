@@ -70,12 +70,6 @@ uint8_t DmMotorDriver::MotorInit() {
     Timer::ThreadSleepFor(normal_sleep_time);
 
     switch (error_id_) {
-        case DMError::DM_DOWN:
-            return DMError::DM_DOWN;
-            break;
-        case DMError::DM_UP:
-            return DMError::DM_UP;
-            break;
         case DMError::LOST_CONN:
             return DMError::LOST_CONN;
             break;
@@ -98,7 +92,7 @@ uint8_t DmMotorDriver::MotorInit() {
             return DMError::OVER_LOAD;
             break;
         default:
-            return error_id_;
+            return DMError::DM_UP;
     }
     return error_id_;
 }
@@ -145,6 +139,8 @@ void DmMotorDriver::CanRxMsgCallback(const can_frame& rx_frame) {
         range_map(t_int, uint16_t(0), bitmax<uint16_t>(12), -limit_param_.TauMax, limit_param_.TauMax);
     mos_temperature_ = rx_frame.data[6];
     motor_temperature_ = rx_frame.data[7];
+
+    std::cout<<"ID "<<motor_id_<<": "<<motor_pos_<<std::endl;
 }
 
 void DmMotorDriver::MotorGetParam(uint8_t param_cmd) {

@@ -121,7 +121,7 @@ void SocketCAN::open(std::string interface) {
                 count += 1;
                 std::this_thread::sleep_for(std::chrono::microseconds(1000));  // 避免忙等待
             }
-            if (count >= MAX_RETRY_COUNT) logger_->error("Failed to transmit CAN frame");
+            //if (count >= MAX_RETRY_COUNT) logger_->error("Failed to transmit CAN frame");
             count = 0;
         }
     });

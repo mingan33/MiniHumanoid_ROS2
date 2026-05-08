@@ -16,18 +16,8 @@ find_package(sensor_msgs REQUIRED)
 
 add_executable(MotCtrl_node src/MotCtrl_node.cpp src/dm_motor_driver.cpp src/encos_motor_driver.cpp src/SocketCAN.cpp)
 
-add_executable(single_motor_ctrl_node src/single_motor_ctrl_test.cpp src/dm_motor_driver.cpp src/encos_motor_driver.cpp src/SocketCAN.cpp)
-
 ament_target_dependencies(
   MotCtrl_node
-  "rclcpp"
-  "ros2_socketcan"
-  "ros2_socketcan_msgs"
-  "sensor_msgs"
-)
-
-ament_target_dependencies(
-  single_motor_ctrl_node
   "rclcpp"
   "ros2_socketcan"
   "ros2_socketcan_msgs"
@@ -37,15 +27,9 @@ ament_target_dependencies(
 
 
 target_link_libraries(MotCtrl_node fmt::fmt spdlog::spdlog)
-target_link_libraries(single_motor_ctrl_node fmt::fmt spdlog::spdlog)
 
 install(TARGETS
   MotCtrl_node
-  DESTINATION lib/${PROJECT_NAME}
-)
-
-install(TARGETS
-  single_motor_ctrl_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

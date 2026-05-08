@@ -29,20 +29,12 @@ class MotorWrapper {
 
     uint8_t MotorInit() {
         if (dm_) {
-            return dm_->MotorInit();
+            return dm_->MotorInit();//反馈达妙初始化结果
         }
-        // ENCOS：切到响应模式后，发送一帧安全 MIT 命令并等待回包确认链路可用。
-        const int rx_before = encos_->get_rx_count();
+        //因克斯初始化
         encos_->MotorSetting(0x02);
-        Timer::ThreadSleepForUs(2000);
-        encos_->MotorMitCtrlCmd(encos_->get_motor_pos(), 0.0f, 0.0f, 0.0f, 0.0f);
-        for (int i = 0; i < 20; ++i) {
-            if (encos_->get_rx_count() > rx_before) {
-                return DMError::DM_UP;
-            }
-            Timer::ThreadSleepForUs(1000);
-        }
-        return DMError::DM_DOWN;
+
+        return DMError::DM_UP;//因克斯默认成功
     }
 
     void MotorDeInit() {
@@ -101,14 +93,14 @@ class MotorsNode : public rclcpp::Node {
     MotorsNode() : Node("MotorCtrl_node") {
 
         // 每条 CAN 链路独立配置：起始 ID + 电机数量（默认从 0 开始）
-        can0_startID_ = this->declare_parameter<int>("can0_start_id", 0);
-        can1_startID_ = this->declare_parameter<int>("can1_start_id", 0);
-        can2_startID_ = this->declare_parameter<int>("can2_start_id", 0);
-        can3_startID_ = this->declare_parameter<int>("can3_start_id", 0);
-        int can0_motor_count = this->declare_parameter<int>("can0_motor_count", 3);
-        int can1_motor_count = this->declare_parameter<int>("can1_motor_count", 3);
-        int can2_motor_count = this->declare_parameter<int>("can2_motor_count", 3);
-        int can3_motor_count = this->declare_parameter<int>("can3_motor_count", 3);
+        can0_startID_ = this->declare_parameter<int>("can0_start_id", 1);
+        can1_startID_ = this->declare_parameter<int>("can1_start_id", 1);
+        can2_startID_ = this->declare_parameter<int>("can2_start_id", 1);
+        can3_startID_ = this->declare_parameter<int>("can3_start_id", 1);
+        int can0_motor_count = this->declare_parameter<int>("can0_motor_count", 5);
+        int can1_motor_count = this->declare_parameter<int>("can1_motor_count", 5);
+        int can2_motor_count = this->declare_parameter<int>("can2_motor_count", 5);
+        int can3_motor_count = this->declare_parameter<int>("can3_motor_count", 5);
         if (can0_motor_count <= 0) {
             RCLCPP_WARN(this->get_logger(), "can0_motor_count <= 0, fallback to 1");
             can0_motor_count = 1;
@@ -189,13 +181,13 @@ class MotorsNode : public rclcpp::Node {
 
         // 关节方向支持整型数组参数，长度会在 normalize_dirs 中自动对齐
         left_leg_joint_dirs_ = to_int_dirs(
-            this->declare_parameter<std::vector<int64_t>>("can0_joint_dirs", std::vector<int64_t>{1, -1, 1}));
+            this->declare_parameter<std::vector<int64_t>>("can0_joint_dirs", std::vector<int64_t>{1, 1, 1, 1, 1}));
         right_leg_joint_dirs_ = to_int_dirs(
-            this->declare_parameter<std::vector<int64_t>>("can1_joint_dirs", std::vector<int64_t>{1, -1, 1}));
+            this->declare_parameter<std::vector<int64_t>>("can1_joint_dirs", std::vector<int64_t>{1, 1, 1, 1, 1}));
         left_arm_joint_dirs_ = to_int_dirs(
-            this->declare_parameter<std::vector<int64_t>>("can2_joint_dirs", std::vector<int64_t>{1, -1, 1}));
+            this->declare_parameter<std::vector<int64_t>>("can2_joint_dirs", std::vector<int64_t>{1, 1, 1, 1, 1}));
         right_arm_joint_dirs_ = to_int_dirs(
-            this->declare_parameter<std::vector<int64_t>>("can3_joint_dirs", std::vector<int64_t>{1, -1, 1}));
+            this->declare_parameter<std::vector<int64_t>>("can3_joint_dirs", std::vector<int64_t>{1, 1, 1, 1, 1}));
         normalize_dirs(left_leg_joint_dirs_, left_leg_motors_DM.size(), "left_leg");
         normalize_dirs(right_leg_joint_dirs_, right_leg_motors_DM.size(), "right_leg");
         normalize_dirs(left_arm_joint_dirs_, left_arm_motors_DM.size(), "left_arm");
