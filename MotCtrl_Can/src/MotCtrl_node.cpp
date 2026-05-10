@@ -291,6 +291,78 @@ void MotorsNode::control_timer_callback() {
     publish_right_arm();
 }
 
+// 功能：1Hz 通讯统计回调，按 limb 汇总并打印 tx/rx/loss/rtt 指标。
+void MotorsNode::stats_timer_callback() {
+    if (!is_init_.load()) {
+        return;
+    }
+    log_limb_stats("left_leg",  left_leg_motors_DM);
+    log_limb_stats("right_leg", right_leg_motors_DM);
+    log_limb_stats("left_arm",  left_arm_motors_DM);
+    log_limb_stats("right_arm", right_arm_motors_DM);
+}
+
+// 功能：汇总单条 limb 的窗口统计并打印一行日志，随后清零窗口计数器（保留 EWMA）。
+void MotorsNode::log_limb_stats(const char* limb_name, const MotorGroup& motors) {
+    if (motors.empty()) {
+        return;
+    }
+
+    uint64_t tx_sum = 0;
+    uint64_t rx_sum = 0;
+    int64_t ewma_sum_ns = 0;
+    int ewma_n = 0;
+    int64_t max_ns = 0;
+    int max_motor_id = -1;
+
+    for (const auto& m : motors) {
+        tx_sum += m->get_tx_count();
+        rx_sum += m->get_rx_count();
+        const int64_t ewma = m->get_ewma_latency_ns();
+        if (ewma > 0) {
+            ewma_sum_ns += ewma;
+            ++ewma_n;
+        }
+        const int64_t mx = m->get_max_latency_ns();
+        if (mx > max_ns) {
+            max_ns = mx;
+            max_motor_id = static_cast<int>(m->get_motor_id());
+        }
+        m->reset_stats_window();
+    }
+
+    const double loss_pct = (tx_sum > 0)
+        ? 100.0 * static_cast<double>(tx_sum - rx_sum) / static_cast<double>(tx_sum)
+        : 0.0;
+    const double rtt_avg_us = (ewma_n > 0)
+        ? static_cast<double>(ewma_sum_ns) / ewma_n / 1000.0
+        : 0.0;
+    const double rtt_max_us = static_cast<double>(max_ns) / 1000.0;
+
+    if (max_motor_id >= 0) {
+        RCLCPP_INFO(
+            this->get_logger(),
+            "[stats] %s n=%zu tx=%llu rx=%llu loss=%.2f%% rtt_avg=%.0fus rtt_max=%.0fus(motor#%d)",
+            limb_name,
+            motors.size(),
+            static_cast<unsigned long long>(tx_sum),
+            static_cast<unsigned long long>(rx_sum),
+            loss_pct,
+            rtt_avg_us,
+            rtt_max_us,
+            max_motor_id);
+    } else {
+        RCLCPP_INFO(
+            this->get_logger(),
+            "[stats] %s n=%zu tx=%llu rx=%llu loss=%.2f%% rtt_avg=N/A rtt_max=N/A",
+            limb_name,
+            motors.size(),
+            static_cast<unsigned long long>(tx_sum),
+            static_cast<unsigned long long>(rx_sum),
+            loss_pct);
+    }
+}
+
 // 功能：看门狗定时器回调，检测命令超时并切换到安全输出。
 void MotorsNode::watchdog_timer_callback() {
     if (!is_init_.load()) {

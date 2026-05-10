@@ -106,6 +106,19 @@ class DmMotorDriver
     float get_motor_current() { return motor_current_; }
     float get_motor_temperature() { return motor_temperature_; }
 
+    // 通讯统计：仅控制帧（MIT/POS/SPD）参与计数与时延测量。
+    uint64_t get_tx_count() const { return tx_count_.load(); }
+    uint64_t get_rx_count() const { return rx_count_.load(); }
+    int64_t get_ewma_latency_ns() const { return ewma_latency_ns_.load(); }
+    int64_t get_max_latency_ns() const { return max_latency_ns_.load(); }
+    int64_t get_last_rx_ns() const { return last_rx_ns_.load(); }
+    // 用于窗口化统计：清零 tx/rx 累计与 max 高水位，但保留 EWMA 平滑值。
+    void reset_stats_window() {
+        tx_count_.store(0);
+        rx_count_.store(0);
+        max_latency_ns_.store(0);
+    }
+
    private:
     std::string can_interface_;
     bool param_cmd_flag_[30] = {false};
@@ -133,6 +146,14 @@ class DmMotorDriver
     std::atomic<float> motor_pos_{0.f};
     std::atomic<float> motor_spd_{0.f};
     std::atomic<float> motor_current_{0.f};
+
+    // 通讯统计字段。last_tx_ns_ 仅控制帧 TX 时刷新，与 RX 配对算 RTT。
+    std::atomic<int64_t> last_tx_ns_{0};
+    std::atomic<int64_t> last_rx_ns_{0};
+    std::atomic<uint64_t> tx_count_{0};
+    std::atomic<uint64_t> rx_count_{0};
+    std::atomic<int64_t> ewma_latency_ns_{0};
+    std::atomic<int64_t> max_latency_ns_{0};
 
     int normal_sleep_time = 5;
     int setup_sleep_time = 500;

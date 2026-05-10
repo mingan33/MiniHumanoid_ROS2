@@ -1,4 +1,13 @@
 #include "encos_motor_driver.hpp"
+#include <chrono>
+
+namespace {
+inline int64_t steady_now_ns() {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+}  // namespace
 
 float fmaxf(float x, float y){
     /// Returns maximum of x, y ///
@@ -160,6 +169,8 @@ void EncosMotorDriver::MotorMitCtrlCmd(float pos,float spd,float kp,float kd,flo
 	tx_frame.data[6] = (spd_int&0x0F)<<4|(tor_int>>8);
 	tx_frame.data[7] = tor_int&0xff;
 
+    last_tx_ns_.store(steady_now_ns(), std::memory_order_relaxed);
+    tx_count_.fetch_add(1, std::memory_order_relaxed);
     can_->transmit(tx_frame);
     {
         response_count_++;
@@ -187,7 +198,23 @@ void EncosMotorDriver::CanRxMsgCallback(const can_frame& rx_frame){
 
 			motor_temperature_ = (rx_frame.data[6]-50)/2;
 			mos_temperature_ = (rx_frame.data[7]-50)/2;
-            rx_count_++;
+
+            const int64_t now_ns = steady_now_ns();
+            const int64_t tx_ns = last_tx_ns_.load(std::memory_order_relaxed);
+            if (tx_ns != 0) {
+                const int64_t rtt = now_ns - tx_ns;
+                if (rtt > 0) {
+                    const int64_t prev_ewma = ewma_latency_ns_.load(std::memory_order_relaxed);
+                    const int64_t new_ewma = (prev_ewma == 0) ? rtt : prev_ewma + (rtt - prev_ewma) / 10;
+                    ewma_latency_ns_.store(new_ewma, std::memory_order_relaxed);
+                    int64_t prev_max = max_latency_ns_.load(std::memory_order_relaxed);
+                    while (rtt > prev_max &&
+                           !max_latency_ns_.compare_exchange_weak(prev_max, rtt, std::memory_order_relaxed)) {
+                    }
+                }
+            }
+            last_rx_ns_.store(now_ns, std::memory_order_relaxed);
+            rx_count_.fetch_add(1, std::memory_order_relaxed);
 
             std::cout<<"ID "<<motor_id_<<": "<<motor_pos_<<std::endl;
         }

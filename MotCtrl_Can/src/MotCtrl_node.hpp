@@ -72,6 +72,24 @@ class MotorWrapper {
     float get_motor_spd() const { return dm_ ? dm_->get_motor_spd() : encos_->get_motor_spd(); }
     float get_motor_current() const { return dm_ ? dm_->get_motor_current() : encos_->get_motor_current(); }
 
+    // 通讯统计代理：转发到底层 driver，仅控制帧（DM 的 MIT/POS/SPD、ENCOS 的 MIT）参与计数。
+    uint8_t get_motor_id() const { return dm_ ? dm_->get_motor_id() : encos_->get_motor_id(); }
+    uint64_t get_tx_count() const { return dm_ ? dm_->get_tx_count() : encos_->get_tx_count(); }
+    uint64_t get_rx_count() const { return dm_ ? dm_->get_rx_count() : encos_->get_rx_count(); }
+    int64_t get_ewma_latency_ns() const {
+        return dm_ ? dm_->get_ewma_latency_ns() : encos_->get_ewma_latency_ns();
+    }
+    int64_t get_max_latency_ns() const {
+        return dm_ ? dm_->get_max_latency_ns() : encos_->get_max_latency_ns();
+    }
+    void reset_stats_window() {
+        if (dm_) {
+            dm_->reset_stats_window();
+        } else {
+            encos_->reset_stats_window();
+        }
+    }
+
    private:
     explicit MotorWrapper(std::shared_ptr<DmMotorDriver> dm) : dm_(std::move(dm)) {}
     explicit MotorWrapper(std::shared_ptr<EncosMotorDriver> encos) : encos_(std::move(encos)) {}
@@ -241,6 +259,10 @@ class MotorsNode : public rclcpp::Node {
         control_timer_ = this->create_wall_timer(
             std::chrono::milliseconds(control_period_ms_),
             std::bind(&MotorsNode::control_timer_callback, this));
+        // 1Hz 通讯统计：按 limb 汇总 tx/rx/loss 与 RTT，便于排查延迟与丢包。
+        stats_timer_ = this->create_wall_timer(
+            std::chrono::seconds(1),
+            std::bind(&MotorsNode::stats_timer_callback, this));
         last_cmd_ns_.store(this->now().nanoseconds());
     
         //初始化电机
@@ -265,6 +287,8 @@ class MotorsNode : public rclcpp::Node {
     // Periodic loops
     void watchdog_timer_callback();
     void control_timer_callback();
+    void stats_timer_callback();
+    void log_limb_stats(const char* limb_name, const MotorGroup& motors);
 
     // Joint state publishing
     void publish_left_leg();
@@ -341,5 +365,6 @@ class MotorsNode : public rclcpp::Node {
 
     rclcpp::TimerBase::SharedPtr watchdog_timer_;
     rclcpp::TimerBase::SharedPtr control_timer_;
+    rclcpp::TimerBase::SharedPtr stats_timer_;
 
 };

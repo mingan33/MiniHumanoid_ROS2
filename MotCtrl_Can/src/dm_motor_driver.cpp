@@ -1,7 +1,16 @@
 #include "dm_motor_driver.hpp"
+#include <chrono>
+
+namespace {
+inline int64_t steady_now_ns() {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+}  // namespace
 
 Limit_param limit_param[Num_Of_Motor] = {
-    {12.5, 20, 28},   //DM4310_24V 
+    {12.5, 20, 28},   //DM4310_24V
     {12.5, 25, 50},   //DM6006L_48V
 };
 
@@ -117,6 +126,24 @@ void DmMotorDriver::CanRxMsgCallback(const can_frame& rx_frame) {
         response_count_ = 0;
     }
 
+    // 通讯统计：仅在已经至少发过一帧控制帧时配对计算 RTT。
+    const int64_t now_ns = steady_now_ns();
+    const int64_t tx_ns = last_tx_ns_.load(std::memory_order_relaxed);
+    if (tx_ns != 0) {
+        const int64_t rtt = now_ns - tx_ns;
+        if (rtt > 0) {
+            const int64_t prev_ewma = ewma_latency_ns_.load(std::memory_order_relaxed);
+            const int64_t new_ewma = (prev_ewma == 0) ? rtt : prev_ewma + (rtt - prev_ewma) / 10;
+            ewma_latency_ns_.store(new_ewma, std::memory_order_relaxed);
+            int64_t prev_max = max_latency_ns_.load(std::memory_order_relaxed);
+            while (rtt > prev_max &&
+                   !max_latency_ns_.compare_exchange_weak(prev_max, rtt, std::memory_order_relaxed)) {
+            }
+        }
+    }
+    last_rx_ns_.store(now_ns, std::memory_order_relaxed);
+    rx_count_.fetch_add(1, std::memory_order_relaxed);
+
     uint16_t master_id_t = 0;
     uint16_t pos_int = 0;
     uint16_t spd_int = 0;
@@ -189,6 +216,8 @@ void DmMotorDriver::MotorPosModeCmd(float pos, float spd, bool ignore_limit) {
     tx_frame.data[6] = *(vbuf + 2);
     tx_frame.data[7] = *(vbuf + 3);
 
+    last_tx_ns_.store(steady_now_ns(), std::memory_order_relaxed);
+    tx_count_.fetch_add(1, std::memory_order_relaxed);
     can_->transmit(tx_frame);
     {
         response_count_++;
@@ -213,6 +242,8 @@ void DmMotorDriver::MotorSpdModeCmd(float spd) {
     tx_frame.data[2] = rv_type_convert.buf[2];
     tx_frame.data[3] = rv_type_convert.buf[3];
 
+    last_tx_ns_.store(steady_now_ns(), std::memory_order_relaxed);
+    tx_count_.fetch_add(1, std::memory_order_relaxed);
     can_->transmit(tx_frame);
     {
         response_count_++;
@@ -253,6 +284,8 @@ void DmMotorDriver::MotorMitModeCmd(float f_p, float f_v, float f_kp, float f_kd
     tx_frame.data[6] = (kd & 0x0F) << 4 | t >> 8;
     tx_frame.data[7] = t & 0xFF;
 
+    last_tx_ns_.store(steady_now_ns(), std::memory_order_relaxed);
+    tx_count_.fetch_add(1, std::memory_order_relaxed);
     can_->transmit(tx_frame);
     {
         response_count_++;

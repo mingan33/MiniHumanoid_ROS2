@@ -25,7 +25,18 @@ class EncosMotorDriver
     float get_motor_spd() { return motor_spd_; }
     float get_motor_current() { return motor_current_; }
     float get_motor_temperature() { return motor_temperature_; }
-    int get_rx_count() const { return rx_count_.load(); }
+
+    // 通讯统计：仅 MIT 控制帧参与计数与时延测量。
+    uint64_t get_tx_count() const { return tx_count_.load(); }
+    uint64_t get_rx_count() const { return rx_count_.load(); }
+    int64_t get_ewma_latency_ns() const { return ewma_latency_ns_.load(); }
+    int64_t get_max_latency_ns() const { return max_latency_ns_.load(); }
+    int64_t get_last_rx_ns() const { return last_rx_ns_.load(); }
+    void reset_stats_window() {
+        tx_count_.store(0);
+        rx_count_.store(0);
+        max_latency_ns_.store(0);
+    }
 
    private:
     void CanRxMsgCallback(const can_frame& rx_frame);  
@@ -48,13 +59,20 @@ class EncosMotorDriver
     std::shared_ptr<spdlog::logger> logger_;
     
     std::atomic<int> response_count_{0};
-    std::atomic<int> rx_count_{0};
     std::atomic<uint8_t> mos_temperature_{0};
     std::atomic<uint8_t> motor_temperature_{0};
     std::atomic<uint8_t> error_id_{0};
     std::atomic<float> motor_pos_{0.f};
     std::atomic<float> motor_spd_{0.f};
     std::atomic<float> motor_current_{0.f};
+
+    // 通讯统计字段。last_tx_ns_ 仅控制帧 TX 时刷新，与 RX 配对算 RTT。
+    std::atomic<int64_t> last_tx_ns_{0};
+    std::atomic<int64_t> last_rx_ns_{0};
+    std::atomic<uint64_t> tx_count_{0};
+    std::atomic<uint64_t> rx_count_{0};
+    std::atomic<int64_t> ewma_latency_ns_{0};
+    std::atomic<int64_t> max_latency_ns_{0};
 
     uint16_t motor_id_;
     uint16_t master_id_;
